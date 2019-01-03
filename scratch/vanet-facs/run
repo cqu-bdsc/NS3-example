@@ -1,0 +1,143 @@
+#!/bin/bash
+
+if [ "$#" -ne "5" ]
+	then
+		echo "This script requires 5 args (schemeName, space, time, mapSize, TxRange)."
+		echo "Please try again."
+		exit 1
+else
+	schemeName=$1
+	space=$2
+	time=$3
+	mapSize=$4
+	TxRange=$5
+fi
+
+export "NS_LOG=vanet-facs=level_info|prefix_time|prefix_node|prefix_level"
+
+# export "NS_LOG=vanet-facs=level_info|prefix_time|prefix_node|prefix_level:\
+# DataTxApplication=level_info|prefix_time|prefix_node|prefix_level:\
+# UdpSocketImpl=level_info|prefix_time|prefix_node|prefix_level:\
+# OnOffApplication=level_info|prefix_time|prefix_node|prefix_level"
+
+# export "NS_LOG=*=level_all|prefix_func|prefix_time|prefix_node|prefix_level"
+
+# export "NS_LOG="
+
+path="${NS3DIR}/scratch"
+file="scratch/vanet-facs/vanet-facs"
+workspace="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+function waff {
+    CWD="$PWD"
+    cd $NS3DIR >/dev/null
+    ./waf --cwd="$CWD" "$@"
+    cd - >/dev/null
+}
+
+# space="xx"
+# time="xx"
+# mapSize="3x3"
+# dataSource="test" # gps, sumo
+# simtime=10
+
+# space="bj"
+# time="am"
+# mapSize="3x3"
+dataSource="gps" # gps, sumo
+simTime=525 #525
+
+packetSize=512
+dataSize=$((${packetSize} * 1000))
+gDbSize=50
+initReqsScheme="zipf" # zipf, random, test
+# nObu=236
+# nRsu=9
+obuTxRange=${TxRange}
+rsuTxRange=${TxRange}
+bsTxp=35
+bsTxRange=7100
+schePeriod=1
+nClique=1
+isFileOut=1
+log=0
+
+outputDir="${workspace}/result-${schemeName}-${space}-${time}-${mapSize}-${obuTxRange}"
+
+if [ $isFileOut == 1 ];then
+	if [ ! -d $outputDir ];then
+		mkdir -p $outputDir
+	else
+		find ${outputDir} -regextype posix-egrep -regex ".*/${schemeName}-${space}-${time}-${mapSize}.*.(dat|txt)" | xargs rm
+	fi
+fi
+
+
+
+mobilityFile="${PWD}/mobility/${dataSource}-${space}-${time}-${mapSize}.tcl"
+timeNodeidLocationFile="${PWD}/mobility/${dataSource}-${space}-${time}-${mapSize}-time-nodeid-location.txt"
+enterExitStatsFile="${PWD}/mobility/${dataSource}-${space}-${time}-${mapSize}-enter-exit-time.txt"
+
+if [ -f "${timeNodeidLocationFile}" ];then
+	rm -rf ${timeNodeidLocationFile}
+fi
+
+if [ -f "${enterExitStatsFile}" ];then
+	rm -rf ${enterExitStatsFile}
+fi
+
+cat ${mobilityFile} | \
+awk '$2=="at" {print $3, $4, $6, $7}' | \
+sed -r 's/\"\$node_\(([0-9]+)\)/\1/g' >> ${timeNodeidLocationFile}
+
+simTime=`cat ${timeNodeidLocationFile} | awk 'BEGIN{simTime=0;} {if ($1 > simTime) simTime=$1; } END{print simTime}'`
+# simTime=$((${simTime} - 5))
+
+cat ${timeNodeidLocationFile} | \
+awk 'BEGIN{nodeNum=0; for(i = 0; i < 1000; i++) {enter_time[i] = 10000; exit_time[i] = 0}} \
+{if ($2 > nodeNum) nodeNum=$2; if ($1 < enter_time[$2]) enter_time[$2]=$1; if ($1 > exit_time[$2]) exit_time[$2] = $1;} \
+END{for(j = 0; j <= nodeNum; j++) {printf("%s %s %s\n", j, enter_time[j], exit_time[j])}}' >> ${enterExitStatsFile}
+
+nObu=`awk 'END{print NR}' ${enterExitStatsFile}`
+
+if [ "$mapSize" = 3x3 ];then
+	nRsu=9
+	mapWidth=3000
+	mapHeight=3000
+elif [ "$mapSize" = 5x5 ];then
+	nRsu=25
+	mapWidth=5000
+	mapHeight=5000
+elif [ "$mapSize" = 2_5x2_5 ];then
+	nRsu=9
+	mapWidth=2500
+	mapHeight=2500
+fi
+
+if [ $space = "jiangbei" ];then
+	obuTxRange=400
+	rsuTxRange=400
+fi
+
+schemeName=$1
+space=$2
+time=$3
+mapSize=$4
+
+echo "dataSource=$dataSource, space=$space, time=$time, mapSize=$mapSize"
+echo "nObu=$nObu, nRsu=$nRsu, obuTxRange=$obuTxRange, rsuTxRange=$rsuTxRange, bsTxp=$bsTxp, bsTxRange=$bsTxRange"
+echo "gDbSize=$gDbSize, schePeriod=$schePeriod, simTime=$simTime"
+
+if [ $log == 1 ];then
+	waff --run "${file} --cwd=${PWD} --outputDir=${outputDir} --mobilityFile=${mobilityFile} --enterExitStatsFile=${enterExitStatsFile} --timeNodeidLocationFile=${timeNodeidLocationFile} \
+	--nObu=${nObu} --nRsu=${nRsu} --obuTxRange=${obuTxRange} --rsuTxRange=${rsuTxRange} --bsTxRange=${bsTxRange} \
+	--initReqsScheme=${initReqsScheme} --packetSize=${packetSize} --dataSize=${dataSize} --globalDbSize=${gDbSize} \
+	--time=${time} --space=${space} --mapSize=${mapSize} --mapWidth=${mapWidth} --mapHeight=${mapHeight} \
+	--nClique=${nClique} --simTime=${simTime} --schePeriod=${schePeriod} --schemeName=${schemeName} --isFileOut=${isFileOut}" > ${outputDir}/${schemeName}-${space}-${time}-${mapSize}.log 2>&1
+elif [ $log == 0 ];then
+	waff --run "${file} --cwd=${PWD} --outputDir=${outputDir} --mobilityFile=${mobilityFile} --enterExitStatsFile=${enterExitStatsFile} --timeNodeidLocationFile=${timeNodeidLocationFile} \
+	--nObu=${nObu} --nRsu=${nRsu} --obuTxRange=${obuTxRange} --rsuTxRange=${rsuTxRange} --bsTxRange=${bsTxRange} \
+	--initReqsScheme=${initReqsScheme} --packetSize=${packetSize} --dataSize=${dataSize} --globalDbSize=${gDbSize} \
+	--time=${time} --space=${space} --mapSize=${mapSize} --mapWidth=${mapWidth} --mapHeight=${mapHeight} \
+	--nClique=${nClique} --simTime=${simTime} --schePeriod=${schePeriod} --schemeName=${schemeName} --isFileOut=${isFileOut}"
+fi
